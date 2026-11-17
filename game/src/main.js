@@ -5,7 +5,8 @@
 //
 // ?seed=N builds the city from that seed (the live game always uses the same city, so a saved
 // game keeps its streets). ?shot=title|drive|chase|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
+// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot;
+// adding &dl=1 also downloads the frozen frame as that scene's screenshot file.
 import { STEP, VIEW, WORLD_SEED } from './config.js';
 import { createAudio } from './audio.js';
 import { beginStory, clearSave, createGame, loadSave, saveGame, stepGame } from './game.js';
@@ -19,6 +20,7 @@ const MAX_FRAME = 0.25;
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
+const download = params.get('dl') === '1';
 const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
 const seed = Number.isInteger(seedParam) ? seedParam : WORLD_SEED;
 
@@ -30,6 +32,37 @@ const status = document.getElementById('status');
 const renderer = createRenderer(canvas);
 const audio = createAudio();
 
+/** The screenshot file each shot scene is handed in as (the names in shots.json). */
+const SHOT_FILES = { title: '1-title.jpg', drive: '2-drive.jpg', chase: '3-chase.jpg', end: '4-end.jpg' };
+
+/**
+ * Download the frozen shot frame as a JPEG. This exists so the entry's screenshots can be
+ * captured from the live page: a browser cannot save the canvas on its own, so a shot scene
+ * opened with &dl=1 hands its final frame to the browser as a download instead, at the
+ * 1280x720 the screenshots are handed in at. Any scene name but drive, chase or end stages
+ * the title (see stageShot), so it downloads under the title's name too.
+ */
+function downloadShot(name) {
+  let source = canvas;
+  if (canvas.width !== VIEW.width || canvas.height !== VIEW.height) {
+    source = document.createElement('canvas');
+    source.width = VIEW.width;
+    source.height = VIEW.height;
+    source.getContext('2d').drawImage(canvas, 0, 0, VIEW.width, VIEW.height);
+  }
+  source.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = SHOT_FILES[name] ?? SHOT_FILES.title;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, 'image/jpeg', 0.85);
+}
+
 function runShot(name) {
   const state = createGame(seed);
   const scene = stageShot(name, state);
@@ -39,7 +72,11 @@ function runShot(name) {
     drawInterface(ctx, state, scene.screen, false);
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
+    else {
+      window.__shotReady = true;
+      // With &dl=1, the frame it just froze on downloads itself as the scene's screenshot.
+      if (download) setTimeout(() => downloadShot(name), 500);
+    }
   }
   requestAnimationFrame(paint);
 }
